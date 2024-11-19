@@ -17,11 +17,211 @@ editor_options:
 library(tidyverse)
 library(tidymodels)
 library(finalfit)
+tidymodels_prefer()
 theme_set(theme_bw())
 ```
 
 ```{r}
+# load the data and check the structure
 hf <- read_csv("heart_failure.csv")
 head(hf)
 glimpse(hf)
+```
+
+```{r}
+# convert the target variable (death) into a factor
+hf <- hf %>% 
+  mutate(
+    death = factor(death)
+  )
+```
+
+```{r}
+barplot(table(hf$death))
+hist(hf$age)
+```
+
+#### Data Visualization
+
+```{r}
+# barplot of the counts of the outcomes (death)
+hf %>% 
+  ggplot(aes(x = death))+
+  geom_bar()
+
+hf %>% 
+  ggplot(aes(x = sex))+
+  geom_bar()
+```
+
+```{r}
+# histogram showing the distribution  of age
+hf %>% 
+  ggplot(aes(x = age))+
+  geom_histogram(bins = 11,fill = "steelblue",color = "black")
+```
+
+#### Model Building
+
+```{r}
+## splitting the data into training and test sets
+set.seed(123)
+hf_split <- initial_split(hf,prop = 0.8,strata = death)
+hf_train <- training(hf_split)
+hf_test <- testing(hf_split)
+
+```
+
+```{r}
+## divide the data into cross validation folds
+hf_folds <- vfold_cv(hf_train, v = 10)
+
+```
+
+#### Data Preprocessing
+
+```{r}
+# build a parsnip recipe 
+# data preprocessing
+hf_recipe <- recipe(death ~ ., data = hf_train) %>% 
+  step_dummy(sex) %>% 
+  step_normalize(age,serum_creatinine:time)
+
+```
+
+```{r}
+wf <- workflow() %>% 
+  add_recipe(hf_recipe)
+```
+
+#### LASSO Logistic Regression
+
+```{r}
+## specify the model
+tune_spec_lasso <- logistic_reg(penalty = tune(), mixture = 1) %>% 
+  set_engine('glmnet')
+```
+
+```{r}
+# tune the model
+## hyperparameter(penalty) tuning
+lasso_grid <- tune_grid(
+  add_model(wf,tune_spec_lasso),
+  resamples = hf_folds,
+  grid = grid_regular(penalty(), levels = 30)
+)
+
+```
+
+```{r}
+## select best roc and hyperparameter
+highest_roc_lasso <- lasso_grid %>% 
+  select_best()
+```
+
+```{r}
+## finalize workflow
+final_lasso <- finalize_workflow(
+  add_model(wf,tune_spec_lasso),
+  highest_roc_lasso
+)
+```
+
+#### Model evaluation
+
+```{r}
+## fit final model and collect model evaluation  metrics
+
+last_fit(final_lasso,hf_split) %>% 
+  collect_metrics()
+```
+
+```{r}
+## variable importance
+variable_importance <- final_lasso %>% 
+  fit(hf_train) %>% 
+  extract_fit_parsnip() %>% 
+  vip::vi(lambda = highest_roc_lasso$penalty) 
+
+variable_importance
+```
+
+```{r}
+## visualize variable importance
+ final_lasso %>% 
+  fit(hf_train) %>% 
+  extract_fit_parsnip() %>% 
+  vip::vip() 
+```
+
+```{r}
+## custom variable importance plot
+var_imp <- final_lasso %>% 
+  fit(hf_train) %>% 
+  extract_fit_parsnip() %>% tidy()
+
+var_imp
+
+var_imp %>% 
+ggplot(aes(x = reorder(term, abs(estimate)), y = abs(estimate))) +
+  geom_col(fill = "steelblue",color = "black") +
+  coord_flip() +
+ labs(title = "Variable Importance", x = "Features", y = "Absolute Importance")
+```
+
+### Random Forests
+
+```{r}
+## specify model and tune hyperparameters
+
+tune_spec_rf <- rand_forest(
+  mtry = tune(),
+  trees = 100,
+  min_n = tune()
+) %>% 
+  set_mode("classification") %>% 
+  set_engine('ranger')
+```
+
+```{r}
+## train model
+
+rf_grid <- tune_grid(
+  add_model(wf,tune_spec_rf),
+  resamples = hf_folds,
+  grid = grid_regular(
+    mtry(range = c(5,8)),
+    min_n(),
+    levels = 5
+  )
+)
+```
+
+```{r}
+## extract best metrics
+
+highest_roc_rf <- rf_grid %>% 
+  select_best(metric = "roc_auc")
+
+highest_roc_rf
+```
+
+```{r}
+## fit final model
+
+final_rf <- finalize_workflow(
+  add_model(wf,tune_spec_rf),
+  highest_roc_rf
+)
+```
+
+```{r}
+## evaluate model
+last_fit(final_rf,hf_split) %>% 
+  collect_metrics()
+
+last_fit(final_rf,hf_split) %>% 
+  collect_predictions() %>% 
+  conf_mat(death,.pred_class) %>% 
+  autoplot()
 ```

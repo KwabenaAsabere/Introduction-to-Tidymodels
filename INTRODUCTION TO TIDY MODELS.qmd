@@ -1,0 +1,353 @@
+---
+title: "INTRODUCTION TO TIDY MODELS"
+author: "K.ASABERE"
+df-print: kable
+fig-width: 6
+fig-asp: 0.618
+code-overflow: wrap
+format: html
+editor: visual
+execute: 
+  echo: true
+  warning: false
+  message: false
+editor_options: 
+  chunk_output_type: console
+---
+
+
+
+```{r}
+library(tidymodels)
+library(tidyverse)
+library(finalfit)
+tidymodels_prefer()
+theme_set(theme_bw())
+
+heart_failure <- read_csv("heart_failure.csv")
+exercise <- read_csv("exercise.csv")
+
+
+```
+
+
+#### Preprocessing
+```{r}
+heart_failure <- heart_failure %>% 
+  mutate(death = factor(death))
+  
+
+```
+
+### PLOTS
+```{r}
+#| label: plots
+#| fig-cap: barplot of death status
+
+heart_failure %>% 
+  ggplot(aes(x = death)) +
+  geom_bar()
+
+heart_failure %>% 
+  ggplot(aes(x = sex)) +
+  geom_bar()
+
+heart_failure %>% 
+  ggplot(aes(x = age)) +
+  geom_histogram(bins = 11,fill = "lightgrey",color = "black")
+
+```
+
+### Training and Testing
+```{r}
+set.seed(20240522)
+
+hf_split <- initial_split(heart_failure, prop = 0.8)
+hf_train <- training(hf_split)
+hf_test <- testing(hf_split)
+
+
+```
+
+### cross val folds
+```{r}
+hf_folds <- vfold_cv(hf_train, v = 10)
+
+```
+
+#### Recipe
+```{r}
+hf_recipe <- recipe(death ~ ., data = hf_train) %>% 
+  step_dummy(sex) %>% 
+  step_normalize(age, serum_creatinine:time)
+
+hf_workflow <- workflow() %>% 
+  add_recipe(hf_recipe)
+
+```
+
+
+### Trial Exercise
+
+```{r}
+head(exercise)
+glimpse(exercise)
+
+exercise<- exercise %>% 
+  mutate(across(where(is.character),as.factor))
+```
+
+### Explore data
+```{r}
+exercise %>% 
+  ggplot(aes(x = Age))+
+  geom_histogram(fill = "lightgrey",color = "black",bins = 20)
+
+exercise %>% 
+  ggplot(aes(x = SAE))+
+  geom_bar()
+
+exercise %>% 
+  ggplot(aes(x = Scr_Stroke_Type, fill = Gender))+
+  geom_bar( position = "dodge")+
+  scale_fill_viridis_d(option = "viridis")
+
+exercise %>% 
+  ggplot(aes(x = SAE, fill = Gender))+
+  geom_bar( position = "dodge")+
+  scale_fill_viridis_d(option = "viridis")
+
+exercise %>% 
+  ggplot(aes(x = Treatment, fill = Gender))+
+  geom_bar( position = "dodge")+
+  scale_fill_viridis_d(option = "viridis")
+
+
+exercise %>% 
+  ggplot(aes(x = Treatment, fill = Scr_Stroke_Type))+
+  geom_bar( position = "dodge")+
+  scale_fill_viridis_d(option = "viridis")
+
+exercise %>% 
+  ggplot(aes(y= BMI, fill = Gender))+
+  geom_boxplot()
+```
+
+
+```{r}
+set.seed(2024)
+exercise_split <- exercise %>% 
+  initial_split(prop = 0.8)
+
+exercise_train <- training(exercise_split)
+exercise_test <- testing(exercise_split)
+
+exercise_recipe <- exercise_train %>% 
+  recipe(SAE ~ . , data = .) %>% 
+  step_dummy(Treatment: VE_Cardio) %>% 
+  step_normalize(Age: BMI)
+
+
+exercise_workflow <- 
+  workflow() %>% 
+  add_recipe(exercise_recipe)
+
+exercise_fold <- exercise_train %>% 
+  vfold_cv( v = 10)
+
+```
+
+
+### LASSO Logistic Regression
+```{r}
+tune_spec_lasso <- logistic_reg(penalty = tune(), mixture = 1) %>% 
+  set_engine("glmnet")
+
+# tune the model
+lasso_grid <- tune_grid(
+  add_model(hf_workflow, tune_spec_lasso),
+  resamples = hf_folds,
+  grid = grid_regular(penalty(),levels = 30)
+)
+
+highest_roc_aauc_lasso <- lasso_grid %>% 
+  select_best(metric = "roc_auc")
+
+final_lasso <- finalize_workflow(
+  add_model(hf_workflow,tune_spec_lasso),
+  highest_roc_aauc_lasso
+)
+
+```
+
+
+### Model evaluation
+
+```{r}
+last_fit(final_lasso,hf_split) %>% 
+  collect_metrics()
+
+```
+
+### Variable Importance
+```{r}
+final_lasso %>% 
+  fit(hf_train) %>% 
+  extract_fit_parsnip() %>% 
+  vip::vi(lambda = highest_roc_aauc_lasso$penalty)
+
+```
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
